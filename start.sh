@@ -13,5 +13,5 @@ fi
 docker-compose up -d
 
 echo "서비스가 시작되었습니다."
-echo "로그 확인: docker-compose logs -f gerrit-claude-reviewer"
+echo "로그 확인: docker-compose logs -f gerrit-nicolas.choi"
 echo "중지: docker-compose down"

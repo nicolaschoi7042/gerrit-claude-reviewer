@@ -8,27 +8,28 @@ This is a **Gerrit Claude Reviewer** - an automated code review system that inte
 
 ## Key Files Structure
 
-**IMPORTANT**: The main codebase is currently consolidated in `all.txt`. This file contains multiple separate files that need to be extracted:
-- `gerrit_claude_reviewer.py` - Main application
-- `config.yaml` - Configuration template
-- `Dockerfile` & `docker-compose.yml` - Docker deployment files
-- `requirements.txt` - Python dependencies
-- `.env.example` - Environment variables template
+- `gerrit_claude_reviewer.py` - Main application with all core logic
+- `config.yaml` - Configuration template with scheduler and filtering settings
+- `docker-compose.yml` & `Dockerfile` - Docker deployment files
+- `requirements.txt` - Python dependencies (includes selenium for web automation)
 - `start.sh` & `stop.sh` - Service management scripts
-- `README.md` - Installation guide (in Korean)
+- `test_connections.py` - Connection testing utility for both Gerrit SSH and Claude web interface
+- `README.md` - Detailed installation guide (in Korean)
+- Additional test files: `test_env.py`, `test_claude_login.py`, `test_simple_login.py`
 
 ## Development Commands
 
 ### Initial Setup
 ```bash
-# Copy environment configuration
-cp .env.example .env
-# Edit .env with actual credentials (automatically loaded by app)
+# Create .env file for environment variables
+# Set GERRIT_HOST, GERRIT_PORT, GERRIT_USERNAME, SSH_KEY_PATH
+# Set CLAUDE_EMAIL, CLAUDE_PASSWORD for web authentication
+# Set CHROME_DRIVER_PATH for selenium automation
 
-# Test connections first
+# Test all connections (Gerrit SSH + Claude web authentication)
 python test_connections.py
 
-# For Docker deployment:
+# For Docker deployment (recommended):
 chmod +x start.sh stop.sh
 ./start.sh
 
@@ -42,8 +43,8 @@ python gerrit_claude_reviewer.py
 ### Service Management
 - **Start service**: `./start.sh` or `docker-compose up -d`
 - **Stop service**: `./stop.sh` or `docker-compose down`
-- **View logs**: `docker-compose logs -f gerrit-claude-reviewer`
-- **Restart**: `docker-compose restart gerrit-claude-reviewer`
+- **View logs**: `docker-compose logs -f gerrit-nicolas.choi`
+- **Restart**: `docker-compose restart gerrit-nicolas.choi`
 
 ## Architecture
 
@@ -54,11 +55,12 @@ python gerrit_claude_reviewer.py
    - Methods: `get_open_changes()`, `get_change_files()`, `get_file_diff()`, `post_review()`
    - Uses SSH keys for authentication and subprocess calls
 
-2. **ClaudeReviewer** (`gerrit_claude_reviewer.py:154-202`)
-   - Interfaces with Claude API for code analysis
-   - Configurable review aspects (bugs, performance, security, style, testing)
+2. **ClaudeReviewer** (`gerrit_claude_reviewer.py:248-393`)
+   - Web-based Claude interface using Selenium automation
+   - Requires CLAUDE_EMAIL/CLAUDE_PASSWORD for authentication
+   - Automated browser session management with headless Chrome
 
-3. **ReviewTracker** (`gerrit_claude_reviewer.py:204-227`)
+3. **ReviewTracker** (`gerrit_claude_reviewer.py:394-418`)
    - File-based tracking system to prevent duplicate reviews
    - Stores reviewed change IDs in `reviewed_changes.txt`
 
@@ -79,7 +81,7 @@ python gerrit_claude_reviewer.py
 
 The `config.yaml` supports:
 - Gerrit SSH connection settings (host, port, username, ssh_key_path)
-- Claude API configuration  
+- Claude API configuration
 - Schedule customization
 - File filtering rules (extensions, patterns, size limits)
 - Project-specific review rules
@@ -98,14 +100,19 @@ The `config.yaml` supports:
 - Size limits: 500 lines changed, 100KB file size
 
 ### API Integration Points
-- Gerrit API: Uses SSH authentication with SSH keys for command-line interface
-- Claude API: Uses Anthropic's messages API with API key
-- SSH commands include: `gerrit query`, `gerrit review`, and `scp` for patch files
+- **Gerrit SSH API**: Uses SSH authentication with SSH keys for command-line interface
+  - SSH commands: `gerrit query`, `gerrit review`, and `scp` for patch files
+  - Requires proper SSH key setup and Gerrit account permissions
+- **Claude Web Interface**: Uses Selenium WebDriver for browser automation
+  - Automated login with email/password credentials
+  - Text area interaction for prompt submission and response extraction
+  - Requires Chrome/Chromium and ChromeDriver installation
 
 ## Important Notes
 
-1. **No Test Suite**: This project doesn't include tests
-2. **Scheduler-based**: Not event-driven, runs on fixed schedule
-3. **Stateless Design**: Uses file tracking, not database
-4. **Korean Documentation**: README.md is in Korean
-5. **Docker Deployment**: Primary deployment method uses Docker Compose
+1. **Web-based Claude Integration**: Uses Selenium automation instead of direct API calls
+2. **Scheduler-based**: Not event-driven, runs on fixed schedule (configurable intervals)
+3. **Stateless Design**: Uses file tracking (`reviewed_changes.txt`), not database
+4. **Korean Documentation**: README.md is in Korean with detailed setup instructions
+5. **Docker Deployment**: Primary deployment method uses Docker Compose with Chrome/ChromeDriver
+6. **Connection Testing**: Use `python test_connections.py` to verify both Gerrit SSH and Claude web access

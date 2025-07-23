@@ -4,12 +4,12 @@
 
 ### Gerrit 설정
 1. **SSH 키 설정**
-   - SSH 키 생성: `ssh-keygen -t rsa -b 4096 -C "claude-reviewer@example.com"`
+   - SSH 키 생성: `ssh-keygen -t rsa -b 4096 -C "nicolas.choi@example.com"`
    - 공개 키를 Gerrit에 등록: Gerrit 웹 인터페이스 → Settings → SSH Keys
    - 개인 키 위치 확인 (기본: `~/.ssh/id_rsa`)
 
 2. **리뷰어 계정 설정**
-   - 전용 계정 생성 권장 (예: `claude-reviewer`)
+   - 전용 계정 생성 권장 (예: `nicolas.choi`)
    - 필요한 권한: 코드 리뷰 읽기/쓰기, 변경사항 조회
    - SSH 접근 권한 필요
 
@@ -24,7 +24,7 @@
 ```bash
 # 1. 프로젝트 클론
 git clone <repository-url>
-cd gerrit-claude-reviewer
+cd gerrit-nicolas.choi
 
 # 2. 환경 변수 설정
 cp .env.example .env
@@ -58,7 +58,7 @@ cp .env.example .env
 # .env 파일을 편집하여 실제 값으로 수정:
 # GERRIT_HOST=your-gerrit-server.com
 # GERRIT_PORT=29418
-# GERRIT_USERNAME=claude-reviewer
+# GERRIT_USERNAME=nicolas.choi
 # SSH_KEY_PATH=~/.ssh/id_rsa
 # CLAUDE_API_KEY=your-api-key
 
@@ -74,10 +74,10 @@ python gerrit_claude_reviewer.py
 python test_connections.py
 
 # 수동 Gerrit SSH 연결 확인
-ssh -p 29418 claude-reviewer@your-gerrit-server.com gerrit version
+ssh -p 29418 nicolas.choi@your-gerrit-server.com gerrit version
 
 # 수동 변경사항 조회 테스트
-ssh -p 29418 claude-reviewer@your-gerrit-server.com gerrit query --format=JSON status:open limit:1
+ssh -p 29418 nicolas.choi@your-gerrit-server.com gerrit query --format=JSON status:open limit:1
 ```
 
 **중요**: Claude API URL (`https://api.anthropic.com/v1/messages`)에 직접 접근하면 "Method Not Allowed" 오류가 나타나는 것이 정상입니다. 이는 GET 요청을 허용하지 않기 때문이며, POST 요청으로만 접근 가능합니다.
@@ -110,7 +110,7 @@ file_filters:
 ### 로그 모니터링
 ```bash
 # Docker 사용시
-docker-compose logs -f gerrit-claude-reviewer
+docker-compose logs -f gerrit-nicolas.choi
 
 # 직접 실행시
 tail -f gerrit_claude_reviewer.log
@@ -128,7 +128,7 @@ cat reviewed_changes.txt
 ### 문제 해결
 ```bash
 # 컨테이너 재시작
-docker-compose restart gerrit-claude-reviewer
+docker-compose restart gerrit-nicolas.choi
 
 # 설정 변경 후 재시작
 docker-compose down
