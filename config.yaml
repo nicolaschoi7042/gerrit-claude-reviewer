@@ -1,0 +1,113 @@
+# Gerrit Claude 리뷰어 설정 파일
+
+gerrit:
+  host: "your-gerrit-server.com"  # Gerrit SSH 호스트
+  port: 29418  # SSH 포트 (기본값: 29418)
+  username: "claude-reviewer"
+  ssh_key_path: "~/.ssh/id_rsa"  # SSH 키 경로 (환경변수로 오버라이드 가능)
+  
+claude:
+  api_key: "${CLAUDE_API_KEY}"  # 환경변수에서 가져오기
+  model: "claude-sonnet-4-20250514"
+  max_tokens: 1000
+
+reviewer:
+  # 스케줄 설정
+  schedule:
+    - interval: 30  # 30분마다
+      unit: "minutes"
+    - time: "09:00"  # 매일 오전 9시
+      unit: "daily"
+    - time: "14:00"  # 매일 오후 2시
+      unit: "daily"
+  
+  # 파일 필터링
+  file_filters:
+    # 리뷰할 파일 확장자
+    include_extensions:
+      - ".py"
+      - ".java"
+      - ".js"
+      - ".ts" 
+      - ".go"
+      - ".rs"
+      - ".cpp"
+      - ".c"
+      - ".h"
+      - ".scala"
+      - ".kt"
+    
+    # 제외할 경로 패턴
+    exclude_patterns:
+      - "test/"
+      - "tests/"
+      - "__pycache__/"
+      - "node_modules/"
+      - ".git/"
+      - "build/"
+      - "dist/"
+      - "target/"
+      - "generated/"
+      - "auto-generated"
+      - ".min.js"
+      - ".min.css"
+    
+    # 파일 크기 제한 (라인 수)
+    max_lines_changed: 500
+    max_file_size_kb: 100
+
+  # 리뷰 설정
+  review:
+    # 변경사항 조회 범위 (시간)
+    query_time_range: "24h"
+    
+    # 리뷰 프롬프트 커스터마이징
+    review_aspects:
+      - "버그 가능성이나 논리적 오류"
+      - "성능 이슈"
+      - "보안 취약점"
+      - "코딩 스타일 및 베스트 프랙티스"
+      - "테스트 필요성"
+      - "문서화 필요성"
+    
+    # 프로젝트별 특별 규칙
+    project_rules:
+      "backend-service":
+        - "데이터베이스 쿼리 성능 확인"
+        - "API 보안 검증"
+      "frontend-app":
+        - "접근성(a11y) 고려사항"
+        - "브라우저 호환성"
+
+  # 로깅
+  logging:
+    level: "INFO"
+    file: "gerrit_claude_reviewer.log"
+    max_file_size: "10MB"
+    backup_count: 5
+
+# 알림 설정 (선택사항)
+notifications:
+  slack:
+    enabled: false
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+    channel: "#code-review"
+  
+  email:
+    enabled: false
+    smtp_server: "smtp.company.com"
+    smtp_port: 587
+    username: "${SMTP_USERNAME}"
+    password: "${SMTP_PASSWORD}"
+    recipients:
+      - "team-lead@company.com"
+
+# 데이터베이스 설정 (추후 확장용)
+database:
+  type: "sqlite"  # sqlite, mysql, postgresql
+  path: "reviewer_data.db"  # SQLite의 경우
+  # host: "localhost"  # MySQL/PostgreSQL의 경우
+  # port: 3306
+  # database: "gerrit_reviewer"
+  # username: "${DB_USERNAME}"
+  # password: "${DB_PASSWORD}"

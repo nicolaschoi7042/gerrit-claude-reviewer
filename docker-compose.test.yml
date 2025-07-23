@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  claude-login-test:
+    build: .
+    container_name: claude-login-test
+    command: ["python", "test_claude_login.py"]
+    environment:
+      - CLAUDE_WEB_URL=${CLAUDE_WEB_URL}
+      - CLAUDE_EMAIL=${CLAUDE_EMAIL}
+      - CLAUDE_PASSWORD=${CLAUDE_PASSWORD}
+      - CHROME_DRIVER_PATH=/usr/local/bin/chromedriver
+      - DISPLAY=:99
+    volumes:
+      - .:/app
+    # X Virtual Framebuffer for headless Chrome
+    cap_add:
+      - SYS_ADMIN
+    shm_size: 2g
