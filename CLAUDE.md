@@ -9,15 +9,31 @@ This is a **Gerrit Claude Reviewer** - an automated code review system that inte
 ## Key Files Structure
 
 - `gerrit_claude_reviewer.py` - Main application with all core logic
-- `config.yaml` - Configuration template with scheduler and filtering settings
-- `docker-compose.yml` & `Dockerfile` - Docker deployment files
 - `requirements.txt` - Python dependencies
-- `startup.sh` & `install.sh` - Service management and installation scripts
-- `tests/` - Test directory containing:
+- `docker-compose.yml` & `Dockerfile` - Docker deployment files (root level for convenience)
+- `README.md` - Detailed installation guide (in Korean)
+
+### Organized Directories
+
+- `scripts/` - Bash scripts and utilities:
+  - `startup.sh` - Main service startup script
+  - `install.sh` - Installation script for Claude CLI and dependencies
+  - `install_chrome_deps.sh` - Chrome dependencies installer
+  - `start.sh` & `stop.sh` - Simple service management scripts
+- `configs/` - Configuration files:
+  - `config.yaml` - Configuration template with scheduler and filtering settings
+- `docker/` - Docker-related files:
+  - `Dockerfile` - Master Docker build file
+  - `docker-compose.yml` - Master compose configuration
+  - `docker-compose.test.yml` - Test environment configuration
+- `tests/` - Test directory:
   - `test_connections.py` - Connection testing utility for Gerrit SSH and Claude CLI
   - `test_claude_api.py` - Claude CLI API testing
   - `test_integrated_review.py` - Full integration testing
-- `README.md` - Detailed installation guide (in Korean)
+- `data/` & `logs/` - Runtime data and log directories
+- `.github/workflows/` - GitHub Actions CI/CD:
+  - `docker-build.yml` - Docker build verification and compose validation
+  - `test.yml` - Python syntax checking and pre-commit hooks
 
 ## Development Commands
 
@@ -31,8 +47,8 @@ This is a **Gerrit Claude Reviewer** - an automated code review system that inte
 python tests/test_connections.py
 
 # For Docker deployment (recommended):
-chmod +x startup.sh install.sh
-./startup.sh
+chmod +x scripts/startup.sh scripts/install.sh
+./scripts/startup.sh
 
 # For direct Python execution:
 python3 -m venv venv
@@ -43,11 +59,12 @@ python gerrit_claude_reviewer.py
 ```
 
 ### Service Management
-- **Start service**: `./startup.sh` or `docker compose up -d gerrit-nicolas.choi`
-- **Stop service**: `docker compose down`
+- **Start service**: `./scripts/startup.sh` or `docker compose up -d gerrit-nicolas.choi`
+- **Stop service**: `docker compose down` or `./scripts/stop.sh`
 - **View logs**: `docker compose logs -f gerrit-nicolas.choi`
 - **Restart**: `docker compose restart gerrit-nicolas.choi`
 - **Test connections**: `docker compose exec gerrit-nicolas.choi python tests/test_integrated_review.py`
+- **Install dependencies**: `./scripts/install.sh`
 
 ## Architecture
 
@@ -92,12 +109,16 @@ The `.env` file supports:
 - Logging configuration (LOG_FILE, LOG_LEVEL)
 - API timing (API_DELAY_SECONDS, CLAUDE_CLI_TIMEOUT)
 
+The `configs/config.yaml` file provides template configuration structure for advanced settings.
+
 ## Working with the Code
 
 ### Adding New Features
 - All business logic is in `gerrit_claude_reviewer.py`
-- Configuration options go in `config.yaml`
+- Configuration templates in `configs/config.yaml`
 - Environment secrets use `.env` file (automatically loaded with python-dotenv)
+- Helper scripts go in `scripts/` directory
+- Tests go in `tests/` directory
 
 ### File Filtering Logic
 - Review target extensions: `.py`, `.java`, `.js`, `.ts`, `.go`, `.rs`, `.cpp`, `.c`, `.h`, `.sh`, `.yaml`, `.json`, `.xml`, `.sql`, `.md`, `.kt`, `.scala`, `.rb`, `.php`, `.swift`, `.dart` and more

@@ -1,0 +1,49 @@
+name: Docker Build Check
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: false
+        tags: gerrit-claude-reviewer:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Test Docker image
+      run: |
+        docker run --rm gerrit-claude-reviewer:test python --version
+        docker run --rm gerrit-claude-reviewer:test node --version
+        docker run --rm gerrit-claude-reviewer:test claude --version || true
+
+  docker-compose-check:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Validate docker-compose.yml
+      run: |
+        docker-compose -f docker-compose.yml config --quiet
+
+    - name: Test docker-compose build
+      run: |
+        docker-compose -f docker-compose.yml build --no-cache

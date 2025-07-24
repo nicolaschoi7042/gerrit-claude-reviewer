@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  gerrit-nicolas.choi:
+    build: .
+    container_name: gerrit-nicolas.choi
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os; print('healthy' if os.path.exists('/tmp/service_ready') else exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    environment:
+      - GERRIT_HOST=${GERRIT_HOST}
+      - GERRIT_PORT=${GERRIT_PORT}
+      - GERRIT_USERNAME=${GERRIT_USERNAME}
+      - SSH_KEY_PATH=/app/.ssh/id_rsa
+      - CLAUDE_WEB_URL=${CLAUDE_WEB_URL}
+      - CLAUDE_EMAIL=${CLAUDE_EMAIL}
+      - CLAUDE_PASSWORD=${CLAUDE_PASSWORD}
+      - CHROME_DRIVER_PATH=/usr/local/bin/chromedriver
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+    volumes:
+      - ./configs/config.yaml:/app/configs/config.yaml:ro
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ~/.ssh/id_rsa:/app/.ssh/id_rsa:ro
+      - ~/.ssh/id_rsa.pub:/app/.ssh/id_rsa.pub:ro
+    networks:
+      - reviewer-network
+
+    # 메모리 제한
+    mem_limit: 512m
+    memswap_limit: 512m
+
+    # CPU 제한
+    cpus: '0.5'
+
+  # Redis (선택사항 - 큐 시스템용)
+  redis:
+    image: redis:7-alpine
+    container_name: gerrit-reviewer-redis
+    restart: unless-stopped
+    networks:
+      - reviewer-network
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+
+networks:
+  reviewer-network:
+    driver: bridge
+
+volumes:
+  redis-data:
