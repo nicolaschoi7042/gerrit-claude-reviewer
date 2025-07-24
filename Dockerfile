@@ -7,6 +7,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     git \
     curl \
+    jq \
     wget \
     vim \
     sudo \

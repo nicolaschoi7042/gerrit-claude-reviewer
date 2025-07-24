@@ -162,22 +162,10 @@ class GerritAPI:
             return {}
 
     def get_file_diff(self, change_number: str, patchset_number: str, file_path: str) -> str:
-        """파일의 실제 diff 내용 가져오기"""
+        """파일의 변경 정보 가져오기 - 향상된 요약 제공"""
         try:
-            # Git 명령을 통해 diff 가져오기 시도
-            current_revision = self._get_current_revision(change_number)
-            if current_revision:
-                # Git diff 명령 실행
-                git_command = f"cd /tmp && git show {current_revision} -- {file_path}"
-                try:
-                    result = subprocess.run(git_command, shell=True, capture_output=True, text=True, timeout=30)
-                    if result.returncode == 0 and result.stdout:
-                        return result.stdout
-                except Exception as e:
-                    logger.debug(f"Git diff failed: {e}")
-
-            # Git이 실패하면 요약 방식 사용
-            return self._get_file_summary(change_number, file_path)
+            # 파일 변경 요약 정보를 더 상세하게 가져오기
+            return self._get_enhanced_file_summary(change_number, file_path)
 
         except Exception as e:
             logger.error(f"Failed to get file diff: {e}")
@@ -203,6 +191,113 @@ class GerritAPI:
         except Exception as e:
             logger.debug(f"Failed to get current revision: {e}")
             return ""
+
+    def _get_parent_revision(self, change_number: str) -> str:
+        """부모 패치셋의 revision 가져오기"""
+        try:
+            command = f"query --current-patch-set change:{change_number} --format=JSON"
+            output = self._run_ssh_command(command)
+
+            for line in output.strip().split("\n"):
+                if not line:
+                    continue
+                data = json.loads(line)
+                if "type" in data and data["type"] == "stats":
+                    continue
+
+                if "currentPatchSet" in data:
+                    parents = data["currentPatchSet"].get("parents", [])
+                    if parents:
+                        return parents[0]  # 첫 번째 부모 사용
+
+            return ""
+        except Exception as e:
+            logger.debug(f"Failed to get parent revision: {e}")
+            return ""
+
+    def _get_enhanced_file_summary(self, change_number: str, file_path: str) -> str:
+        """향상된 파일 변경 요약 정보 가져오기"""
+        try:
+            command = f"query --files --current-patch-set change:{change_number} --format=JSON"
+            output = self._run_ssh_command(command)
+
+            # 프로젝트 정보와 커밋 메시지도 가져오기
+            detail_command = f"query change:{change_number} --format=JSON"
+            detail_output = self._run_ssh_command(detail_command)
+
+            project_name = ""
+            commit_message = ""
+
+            # 상세 정보 파싱
+            for line in detail_output.strip().split("\n"):
+                if not line:
+                    continue
+                data = json.loads(line)
+                if "type" in data and data["type"] == "stats":
+                    continue
+
+                project_name = data.get("project", "")
+                commit_message = data.get("subject", "")
+                break
+
+            # 파일 정보 파싱
+            for line in output.strip().split("\n"):
+                if not line:
+                    continue
+                data = json.loads(line)
+                if "type" in data and data["type"] == "stats":
+                    continue
+
+                if "currentPatchSet" in data:
+                    files = data["currentPatchSet"].get("files", [])
+                    for file_info in files:
+                        if file_info["file"] == file_path:
+                            file_type = file_info.get("type", "MODIFIED")
+                            insertions = file_info.get("insertions", 0)
+                            deletions = file_info.get("deletions", 0)
+
+                            # 파일 확장자로 파일 타입 추정
+                            file_ext = file_path.split(".")[-1].lower() if "." in file_path else ""
+
+                            # 더 상세한 diff 정보 구성
+                            diff_content = f"""=== 파일 변경 분석 ===
+프로젝트: {project_name}
+커밋 제목: {commit_message}
+
+파일: {file_path}
+파일 타입: {file_ext.upper() if file_ext else 'Unknown'} 파일
+변경 타입: {file_type}
+추가된 라인: {insertions}줄
+삭제된 라인: {abs(deletions)}줄
+순 변경: {insertions + deletions}줄
+
+=== 분석 가능한 내용 ===
+1. 파일 경로로 보아 {'웹소켓 관련' if 'websocket' in file_path or 'ws_' in file_path
+   else 'API 관련' if 'api' in file_path or 'connector' in file_path
+   else '설정' if any(x in file_path for x in ['.yaml', '.json', '.cfg', '.ini'])
+   else '스크립트' if any(x in file_path for x in ['.sh', '.bat', '.py'])
+   else '소스코드'} 파일입니다.
+
+2. 변경 규모: {'소규모' if insertions + abs(deletions) < 20
+   else '중간 규모' if insertions + abs(deletions) < 100
+   else '대규모'} 변경 ({insertions + abs(deletions)}줄)
+
+3. 변경 패턴: {'주로 추가' if insertions > abs(deletions) * 2
+   else '주로 삭제' if abs(deletions) > insertions * 2
+   else '추가/삭제 균형'}
+
+=== 리뷰 권장사항 ===
+• 파일 타입과 변경 규모를 고려한 검토 필요
+• {commit_message} 관련 변경사항 검증
+• 테스트 케이스 확인 권장"""
+
+                            return diff_content
+
+            return ""
+
+        except Exception as e:
+            logger.error(f"Failed to get enhanced file summary: {e}")
+            return self._get_file_summary(change_number, file_path)
 
     def _get_file_summary(self, change_number: str, file_path: str) -> str:
         """파일 변경 요약 정보 가져오기 (fallback)"""
@@ -533,8 +628,11 @@ def process_changes():
     tracker = ReviewTracker()
 
     # 최근 변경사항 조회 기간 설정
-    query_age = os.getenv("GERRIT_QUERY_AGE", "1d")  # 기본값: 1일
-    query = f"status:open age:{query_age}"
+    query_age = os.getenv("GERRIT_QUERY_AGE", "")  # 기본값: 제한 없음
+    if query_age:
+        query = f"status:open NOT is:wip age:{query_age}"
+    else:
+        query = "status:open NOT is:wip"
 
     changes = gerrit.get_open_changes(query)
     logger.info(f"처리할 변경사항: {len(changes)}개")
