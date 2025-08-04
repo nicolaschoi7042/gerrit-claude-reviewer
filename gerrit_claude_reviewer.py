@@ -162,9 +162,14 @@ class GerritAPI:
             return {}
 
     def get_file_diff(self, change_number: str, patchset_number: str, file_path: str) -> str:
-        """파일의 변경 정보 가져오기 - 향상된 요약 제공"""
+        """파일의 실제 diff 내용 가져오기"""
         try:
-            # 파일 변경 요약 정보를 더 상세하게 가져오기
+            # 먼저 실제 diff 내용을 가져오기 시도
+            diff_content = self._get_actual_file_diff(change_number, file_path)
+            if diff_content:
+                return diff_content
+
+            # 실패하면 향상된 요약으로 fallback
             return self._get_enhanced_file_summary(change_number, file_path)
 
         except Exception as e:
@@ -214,6 +219,108 @@ class GerritAPI:
         except Exception as e:
             logger.debug(f"Failed to get parent revision: {e}")
             return ""
+
+    def _get_actual_file_diff(self, change_number: str, file_path: str) -> str:
+        """실제 파일 diff 내용 가져오기"""
+        try:
+            # Gerrit SSH에서는 git 명령을 사용할 수 없으므로 REST API로만 시도
+            return self._get_diff_via_rest_api(change_number, file_path)
+
+        except Exception as e:
+            logger.debug(f"Failed to get actual file diff for {file_path}: {e}")
+            return ""
+
+    def _get_diff_via_rest_api(self, change_number: str, file_path: str) -> str:
+        """REST API를 통해 diff 가져오기"""
+        try:
+            import requests
+
+            # Gerrit REST API로 diff 가져오기 (인증 없이 시도)
+            escaped_path = file_path.replace("/", "%2F")
+
+            # HTTP와 HTTPS 모두 시도
+            for scheme in ["http", "https"]:
+                gerrit_url = (
+                    f"{scheme}://{self.host}/changes/{change_number}/revisions/current/files/{escaped_path}/diff"
+                )
+
+                try:
+                    response = requests.get(gerrit_url, timeout=10)
+
+                    if response.status_code == 200:
+                        # Gerrit은 JSON 앞에 )]}'를 붙이므로 제거
+                        json_str = response.text
+                        if json_str.startswith(")]}'"):
+                            json_str = json_str[4:]
+
+                        diff_data = json.loads(json_str)
+                        return self._parse_gerrit_diff(diff_data, file_path)
+                    elif response.status_code == 401:
+                        logger.debug(f"Authentication required for {scheme}://{self.host}")
+                        continue
+                    else:
+                        logger.debug(f"REST API diff failed with status {response.status_code} for {scheme}")
+                        continue
+
+                except requests.exceptions.RequestException as e:
+                    logger.debug(f"Request failed for {scheme}://{self.host}: {e}")
+                    continue
+
+            return ""
+
+        except Exception as e:
+            logger.debug(f"Failed to get diff via REST API for {file_path}: {e}")
+            return ""
+
+    def _parse_gerrit_diff(self, diff_data: dict, file_path: str) -> str:
+        """Gerrit diff 데이터를 표준 diff 형식으로 변환"""
+        try:
+            content_lines = []
+            content_lines.append(f"--- a/{file_path}")
+            content_lines.append(f"+++ b/{file_path}")
+
+            if "content" in diff_data:
+                for content_block in diff_data["content"]:
+                    if "ab" in content_block:
+                        # 변경되지 않은 라인들
+                        for line in content_block["ab"]:
+                            content_lines.append(f" {line}")
+
+                    if "a" in content_block:
+                        # 삭제된 라인들
+                        for line in content_block["a"]:
+                            content_lines.append(f"-{line}")
+
+                    if "b" in content_block:
+                        # 추가된 라인들
+                        for line in content_block["b"]:
+                            content_lines.append(f"+{line}")
+
+            return "\n".join(content_lines)
+
+        except Exception as e:
+            logger.debug(f"Failed to parse Gerrit diff: {e}")
+            return ""
+
+    def _format_diff_output(self, diff_output: str, file_path: str) -> str:
+        """Git diff 출력을 정리된 형식으로 변환"""
+        lines = diff_output.split("\n")
+        formatted_lines = []
+
+        # 헤더 추가
+        formatted_lines.append(f"--- a/{file_path}")
+        formatted_lines.append(f"+++ b/{file_path}")
+
+        # diff 내용 처리
+        in_diff = False
+        for line in lines:
+            if line.startswith("@@"):
+                in_diff = True
+                formatted_lines.append(line)
+            elif in_diff:
+                formatted_lines.append(line)
+
+        return "\n".join(formatted_lines)
 
     def _get_enhanced_file_summary(self, change_number: str, file_path: str) -> str:
         """향상된 파일 변경 요약 정보 가져오기"""
@@ -445,9 +552,17 @@ class ClaudeReviewer:
         escaped_path = file_path.replace("'", "'\"'\"'")
         escaped_full = full_content.replace("'", "'\"'\"'") if full_content else ""
 
+        # diff 내용이 실제 코드 변경사항인지 확인
+        has_actual_diff = (
+            "@@" in diff_content
+            or (diff_content.count("+") > 2 and diff_content.count("-") > 2)
+            or any(line.startswith(("+", "-")) for line in diff_content.split("\n"))
+        )
+
         # 전체 파일 내용이 있으면 더 상세한 프롬프트 사용
         if full_content and len(full_content) > 50:
-            prompt = f"""다음 코드 변경사항을 전체 파일 맥락과 함께 리뷰해주세요:
+            if has_actual_diff:
+                prompt = f"""다음 코드 변경사항을 전체 파일 맥락과 함께 상세히 리뷰해주세요:
 
 파일: {escaped_path}
 
@@ -456,38 +571,73 @@ class ClaudeReviewer:
 {escaped_full}
 ```
 
-변경된 내용 (diff):
+실제 변경된 내용 (diff):
 ```diff
 {escaped_diff}
 ```
 
-전체 파일 맥락을 고려하여 다음 관점에서 리뷰해주세요:
+전체 파일 맥락을 고려하여 다음 관점에서 구체적으로 리뷰해주세요:
 1. 변경사항이 전체 코드 구조와 일관성이 있는지
 2. 함수/변수명이 기존 코드 스타일과 맞는지
 3. 의존성이나 호출 관계에 문제가 없는지
-4. 버그 가능성이나 논리적 오류
+4. 버그 가능성이나 논리적 오류 (특히 + 및 - 라인 분석)
 5. 성능 이슈 및 보안 취약점
 6. 테스트 필요성
 
-구체적이고 실행 가능한 피드백을 제공해주세요. 문제가 없다면 '문제없음'이라고 답변해주세요."""
-        else:
-            prompt = f"""다음 코드 변경사항을 리뷰해주세요:
+실제 코드 라인을 참조하여 구체적이고 실행 가능한 피드백을 제공해주세요. 문제가 없다면 '문제없음'이라고 답변해주세요."""
+            else:
+                prompt = f"""다음 파일 변경 요약을 리뷰해주세요:
 
 파일: {escaped_path}
 
-변경된 내용:
+전체 파일 내용:
+```
+{escaped_full}
+```
+
+변경 요약:
+{escaped_diff}
+
+파일 전체를 검토하여 다음 관점에서 리뷰해주세요:
+1. 코드 품질 및 구조
+2. 잠재적 버그나 이슈
+3. 성능 및 보안 고려사항
+4. 베스트 프랙티스 준수 여부
+
+구체적인 피드백을 제공해주세요. 문제가 없다면 '문제없음'이라고 답변해주세요."""
+        else:
+            if has_actual_diff:
+                prompt = f"""다음 코드 변경사항을 상세히 리뷰해주세요:
+
+파일: {escaped_path}
+
+실제 변경된 내용 (diff):
 ```diff
 {escaped_diff}
 ```
 
-다음 관점에서 리뷰해주세요:
-1. 버그 가능성이나 논리적 오류
+다음 관점에서 각 변경된 라인을 구체적으로 분석해주세요:
+1. 버그 가능성이나 논리적 오류 (+ 추가된 라인, - 삭제된 라인 검토)
 2. 성능 이슈
 3. 보안 취약점
 4. 코딩 스타일 및 베스트 프랙티스
 5. 테스트 필요성
 
-구체적이고 실행 가능한 피드백을 제공해주세요. 문제가 없다면 '문제없음'이라고 답변해주세요."""
+변경된 코드 라인을 직접 인용하며 구체적이고 실행 가능한 피드백을 제공해주세요. 문제가 없다면 '문제없음'이라고 답변해주세요."""
+            else:
+                prompt = f"""다음 파일 변경 요약을 리뷰해주세요:
+
+파일: {escaped_path}
+
+변경 요약:
+{escaped_diff}
+
+다음 관점에서 리뷰해주세요:
+1. 파일 타입과 변경 패턴 분석
+2. 잠재적 이슈 가능성
+3. 리뷰 권장사항
+
+구체적인 피드백을 제공해주세요. 상세한 코드 리뷰를 위해서는 실제 diff 내용이 필요합니다."""
 
         try:
             # Claude CLI 명령 실행
