@@ -42,8 +42,8 @@ jobs:
 
     - name: Validate docker-compose.yml
       run: |
-        docker-compose -f docker-compose.yml config --quiet
+        docker compose -f docker-compose.yml config --quiet
 
     - name: Test docker-compose build
       run: |
-        docker-compose -f docker-compose.yml build --no-cache
+        docker compose -f docker-compose.yml build --no-cache
