@@ -492,7 +492,30 @@ Please review based on file path, change type, and modification statistics."""
             return ""
 
     def post_review(self, change_number: str, patchset_number: str, message: str, score: int = 0):
-        """리뷰 코멘트 작성"""
+        """리뷰 코멘트 작성 (길이 제한 및 재시도 포함)"""
+        # Gerrit comment size limit (16KB)
+        MAX_COMMENT_SIZE = 16384
+
+        # 메시지 길이 확인 및 조정
+        original_message = message
+        if len(message.encode("utf-8")) > MAX_COMMENT_SIZE:
+            logger.warning(
+                f"Comment too long ({len(message.encode('utf-8'))} bytes), truncating to {MAX_COMMENT_SIZE} bytes"
+            )
+            # 안전하게 잘라내기 (UTF-8 바이트 단위로)
+            message_bytes = message.encode("utf-8")[: MAX_COMMENT_SIZE - 100]  # 여유분 확보
+            try:
+                message = message_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                # 바이트 경계에서 잘린 경우, 안전한 지점까지 뒤로 이동
+                for i in range(len(message_bytes) - 1, 0, -1):
+                    try:
+                        message = message_bytes[:i].decode("utf-8")
+                        break
+                    except UnicodeDecodeError:
+                        continue
+            message += "\n\n[리뷰가 너무 길어 일부 내용이 생략되었습니다]"
+
         # 메시지에서 특수 문자 이스케이프
         escaped_message = shlex.quote(message)
 
@@ -512,7 +535,62 @@ Please review based on file path, change type, and modification statistics."""
             return True
 
         except Exception as e:
+            error_msg = str(e)
+
+            # 크기 제한 오류인지 확인
+            if "Comment size exceeds limit" in error_msg:
+                logger.warning("Comment still too long after truncation, trying with summary only")
+                # 더 짧은 요약 버전으로 재시도
+                summary_message = self._create_summary_review(original_message)
+                return self._retry_post_review(change_number, patchset_number, summary_message, score)
+
             logger.error(f"리뷰 코멘트 작성 실패: {e}")
+            return False
+
+    def _create_summary_review(self, original_message: str) -> str:
+        """긴 리뷰를 요약 버전으로 변환"""
+        lines = original_message.split("\n")
+        summary_lines = []
+
+        # 제목과 중요한 섹션만 추출
+        in_important_section = False
+        for line in lines:
+            if any(keyword in line.lower() for keyword in ["🤖", "**", "##", "###", "문제", "이슈", "권장", "필수"]):
+                summary_lines.append(line)
+                in_important_section = True
+            elif in_important_section and line.strip() == "":
+                in_important_section = False
+            elif in_important_section and len(summary_lines) < 20:  # 최대 20줄까지만
+                summary_lines.append(line)
+
+        summary = "\n".join(summary_lines)
+        if len(summary) < 100:  # 너무 짧으면 기본 메시지 추가
+            summary = (
+                "🤖 **Claude 자동 코드 리뷰**\n\n"
+                + "코드 변경사항을 검토했습니다. 주요 검토 사항:\n"
+                + "• 파일 타입과 변경 패턴 분석 완료\n"
+                + "• 잠재적 이슈 및 권장사항 확인\n"
+                + "• 상세한 리뷰는 크기 제한으로 인해 생략됨\n\n"
+                + "실제 diff 내용을 통한 상세 검토를 권장합니다."
+            )
+
+        return summary + "\n\n[전체 리뷰 내용이 Gerrit 크기 제한으로 인해 요약되었습니다]"
+
+    def _retry_post_review(self, change_number: str, patchset_number: str, message: str, score: int = 0) -> bool:
+        """요약 메시지로 리뷰 재시도"""
+        escaped_message = shlex.quote(message)
+        command = f"review --message {escaped_message}"
+
+        if score != 0:
+            command += f" --code-review {score}"
+        command += f" {change_number},{patchset_number}"
+
+        try:
+            self._run_ssh_command(command)
+            logger.info(f"요약 리뷰 코멘트 작성 완료: {change_number}")
+            return True
+        except Exception as e:
+            logger.error(f"요약 리뷰 코멘트 작성도 실패: {e}")
             return False
 
 
@@ -841,17 +919,25 @@ def process_changes():
                     review_comments.append(f"**{file_path}**\n{review_result}")
 
             # 리뷰 코멘트 작성
+            review_success = False
             if review_comments:
                 combined_review = "🤖 **Claude 자동 코드 리뷰**\n\n" + "\n\n".join(review_comments)
                 combined_review += "\n\n---\n*이 리뷰는 Claude AI에 의해 자동 생성되었습니다. 참고용으로만 사용하시고, 최종 판단은 사람이 해주세요.*"
 
-                gerrit.post_review(change.number, patchset_number, combined_review)
-                logger.info(f"리뷰 완료: {change.subject}")
+                review_success = gerrit.post_review(change.number, patchset_number, combined_review)
+                if review_success:
+                    logger.info(f"리뷰 완료: {change.subject}")
+                else:
+                    logger.error(f"리뷰 게시 실패: {change.subject} - 다음 실행 시 재시도됩니다")
             else:
                 logger.info(f"리뷰할 내용 없음: {change.subject}")
+                review_success = True  # 리뷰할 내용이 없어도 처리 완료로 간주
 
-            # 리뷰 완료 표시
-            tracker.mark_reviewed(change.change_id, change.current_revision)
+            # 리뷰 게시가 성공한 경우에만 완료 표시
+            if review_success:
+                tracker.mark_reviewed(change.change_id, change.current_revision)
+            else:
+                logger.warning(f"리뷰 실패로 인해 {change.subject}는 다음 실행 시 재시도됩니다")
 
             # API 호출 제한을 위한 대기
             api_delay = int(os.getenv("API_DELAY_SECONDS", "2"))
