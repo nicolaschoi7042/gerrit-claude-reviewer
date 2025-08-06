@@ -22,14 +22,14 @@ jobs:
       with:
         context: .
         file: ./Dockerfile
-        push: false
+        load: true
         tags: gerrit-claude-reviewer:test
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
     - name: Test Docker image
       run: |
-        docker run --rm gerrit-claude-reviewer:test python --version
+        docker run --rm gerrit-claude-reviewer:test python3 --version
         docker run --rm gerrit-claude-reviewer:test node --version
         docker run --rm gerrit-claude-reviewer:test claude --version || true
 
